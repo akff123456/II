@@ -120,18 +120,21 @@
   <!-- Если вторая модель в формате tfjs доступна, загрузите её через tf.loadGraphModel -->
 
   <script>
-    // Глобальные переменные
+    // Глобальные переменные модели и управления
     let modelA, modelB;
     let isDetecting = false;
     
-    /* Расширённый словарь.
-       Ключ — запрос на русском, значение — массив возможных меток,
-       которые может возвращать модель (на английском). */
+    /* Расширённый словарь: ключ — запрос на русском,
+       значение — массив объектов с синонимами (на английском) и соответствующим весом */
     const translationMap = {
-      "человек": ["person", "man", "human"],
-      "бутылка": ["bottle"],
-      "собака": ["dog"],
-      "кошка": ["cat"],
+      "человек": [{ syn: "person", weight: 1.0 }, { syn: "man", weight: 1.0 }, { syn: "human", weight: 0.8 }],
+      "бутылка": [{ syn: "bottle", weight: 1.0 }],
+      "собака": [{ syn: "dog", weight: 1.0 }],
+      "кошка": [{ syn: "cat", weight: 1.0 }],
+      "банан": [{ syn: "banana", weight: 1.0 }],
+      "холодильник": [{ syn: "refrigerator", weight: 0.9 }],
+      "машина": [{ syn: "car", weight: 1.0 }],
+      "байк": [{ syn: "bicycle", weight: 1.0 }]
       // Добавьте другие пары по необходимости...
     };
 
@@ -169,12 +172,29 @@
       return matrix[b.length][a.length];
     }
 
-    // Функция нечеткого сравнения: возвращает true, если схожесть (1 - distance/maxLen) превышает threshold
-    function fuzzyMatch(str1, str2, threshold = 0.5) {
+    // Функция, возвращающая степень схожести двух строк (0..1)
+    function calculateSimilarity(str1, str2) {
       const distance = levenshtein(str1, str2);
       const maxLen = Math.max(str1.length, str2.length);
-      const similarity = 1 - distance / maxLen;
-      return similarity >= threshold;
+      if (maxLen === 0) return 1.0;
+      return 1 - distance / maxLen;
+    }
+
+    // Функция для проверки, подходит ли детекция под запрос с учетом весов
+    // Если для хотя бы одного синонима (с весом) effectiveSimilarity (similarity * weight)
+    // превышает порог (здесь 0.5), возвращается true.
+    function matchesQuery(predictionClass, query) {
+      let candidates;
+      if (translationMap[query]) {
+        candidates = translationMap[query];
+      } else {
+        candidates = [{ syn: query, weight: 1.0 }];
+      }
+      for (let candidate of candidates) {
+        const sim = calculateSimilarity(candidate.syn, predictionClass);
+        if (sim * candidate.weight >= 0.5) return true;
+      }
+      return false;
     }
 
     // Инициализация камеры (используем заднюю камеру)
@@ -191,13 +211,13 @@
       }
     }
 
-    // Загрузка моделей: сначала загрузка COCO-SSD (modelA), затем попытка загрузки второй модели (modelB).
+    // Загрузка моделей: сначала модель A (COCO-SSD), затем попытка загрузить модель B
     async function loadModels() {
       output.innerText = "Загрузка модели A (COCO-SSD)...";
       modelA = await cocoSsd.load();
       output.innerText = "Модель A загружена. Загрузка модели B...";
       try {
-        // Замените 'path/to/your/model.json' на корректный URL второй модели, если она имеется.
+        // Замените 'path/to/your/model.json' на корректный URL второй модели (если она имеется)
         modelB = await tf.loadGraphModel('path/to/your/model.json');
         output.innerText = "Модель B загружена. Введите запрос и запустите поиск.";
       } catch (err) {
@@ -217,23 +237,19 @@
         modelB ? modelB.detect(video) : Promise.resolve([])
       ]);
       
-      // Объединяем результаты и фильтруем по порогу score >= 0.3
+      // Объединяем результаты и оставляем детекции с score >= 0.3
       let allPredictions = predictionsA.concat(predictionsBArray).filter(pred => pred.score >= 0.3);
       
       // Получаем введённый запрос и приводим его к нижнему регистру
       const query = searchInput.value.trim().toLowerCase();
       
-      // Если запрос есть и он имеется в словаре, используем список синонимов
-      // Если нет — будем сравнивать напрямую с введённым
-      const synonyms = translationMap[query] || [query];
+      // Если запрос указан, фильтруем детекции по наличию соответствия через matchesQuery;
+      // если запрос пустой – показываем все детекции.
+      const finalResults = query ? 
+        allPredictions.filter(pred => matchesQuery(pred.class.toLowerCase(), query)) 
+        : allPredictions;
       
-      // Фильтруем детекции: если хотя бы один из синонимов fuzzyMatch совпадает с меткой детекции (также приведенной к нижнему регистру)
-      const finalResults = query ?
-        allPredictions.filter(pred => 
-          synonyms.some(syn => fuzzyMatch(syn, pred.class.toLowerCase(), 0.5))
-        ) : allPredictions;
-      
-      // Отрисовываем текущий кадр с камеры на canvas
+      // Отрисовываем кадр с камеры на canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
       // Отрисовываем bounding boxes и подписи для найденных объектов
@@ -247,7 +263,7 @@
         ctx.fillText(`${pred.class} ${(pred.score * 100).toFixed(1)}%`, x, y > 20 ? y - 5 : y + 20);
       });
       
-      // Обновляем сообщение в блоке вывода
+      // Обновляем сообщение
       if (query === "") {
         output.innerText = "Введите название предмета для поиска.";
       } else if (finalResults.length > 0) {

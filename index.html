@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisionAI Object Detection - Поиск предметов</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');
+
+    :root {
+      --primary-color: #6c63ff;
+      --accent-color: #9f5fff;
+      --bg-dark: #121212;
+      --bg-light: #f0f0f0;
+      --text-light: #ffffff;
+      --text-dark: #111111;
+      --shadow-glow-soft: 0 0 20px var(--accent-color);
+    }
+
+    [data-theme="dark"] {
+      background-color: var(--bg-dark);
+      color: var(--text-light);
+    }
+
+    [data-theme="light"] {
+      background-color: var(--bg-light);
+      color: var(--text-dark);
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Orbitron', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem;
+      min-height: 100vh;
+    }
+
+    h1 {
+      color: var(--primary-color);
+      text-shadow: var(--shadow-glow-soft);
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+
+    .container {
+      max-width: 700px;
+      width: 100%;
+      background-color: var(--bg-dark);
+      padding: 1rem;
+      border-radius: 15px;
+      box-shadow: var(--shadow-glow-soft);
+    }
+
+    [data-theme="light"] .container {
+      background-color: var(--bg-light);
+    }
+
+    video, canvas {
+      width: 100%;
+      border-radius: 12px;
+      box-shadow: var(--shadow-glow-soft);
+      display: block;
+      margin-bottom: 1rem;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    input, button {
+      padding: 0.6rem 1rem;
+      border-radius: 10px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      margin: 5px;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: var(--accent-color);
+      transform: scale(1.05);
+    }
+
+    #output {
+      text-align: center;
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+    }
+
+    footer {
+      margin-top: auto;
+      padding: 0.5rem;
+      font-size: 0.8rem;
+      color: #888;
+    }
+  </style>
+</head>
+<body data-theme="dark">
+  <h1>VisionAI Object Detection - Поиск предметов</h1>
+  <div class="container">
+    <!-- Видео с камеры -->
+    <video id="webcam" autoplay muted playsinline></video>
+    <!-- Canvas для отрисовки результатов -->
+    <canvas id="canvas"></canvas>
+
+    <div class="controls">
+      <input id="searchInput" type="text" placeholder="Введите название предмета" />
+      <button id="startSearchBtn">🔎 Искать предмет</button>
+      <button id="stopSearchBtn" disabled>⏹ Остановить поиск</button>
+    </div>
+
+    <div id="output">Готов к поиску...</div>
+  </div>
+
+  <footer>© 2025 VisionAI KNN</footer>
+
+  <!-- Загружаем TensorFlow.js и модель COCO-SSD -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+  <script>
+    const video           = document.getElementById('webcam');
+    const canvas          = document.getElementById('canvas');
+    const ctx             = canvas.getContext('2d');
+    const output          = document.getElementById('output');
+    const searchInput     = document.getElementById('searchInput');
+    const startSearchBtn  = document.getElementById('startSearchBtn');
+    const stopSearchBtn   = document.getElementById('stopSearchBtn');
+
+    let cocoSsdModel;
+    let isSearching = false;
+
+    // Словарь для перевода русского запроса в английскую метку модели
+    const translationMap = {
+      "человек": "person",
+      "бутылка": "bottle"
+      // Добавьте другие пары по необходимости.
+    };
+
+    // Инициализация камеры с использованием задней камеры (facingMode: "environment")
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        await new Promise(resolve => video.onloadedmetadata = resolve);
+        video.play();
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      } catch (err) {
+        output.innerText = `Ошибка камеры: ${err.message}`;
+      }
+    }
+
+    // Загрузка модели COCO-SSD
+    async function loadModel() {
+      output.innerText = 'Загрузка модели...';
+      cocoSsdModel = await cocoSsd.load();
+      output.innerText = 'Модель загружена. Введите название предмета для поиска.';
+    }
+
+    // Функция детекции: отрисовываем только те объекты, метка которых совпадает с запросом
+    async function detect() {
+      if (!isSearching) return;
+      
+      // Получаем детекции объектов с видео
+      const predictions = await cocoSsdModel.detect(video);
+      const query = searchInput.value.trim().toLowerCase();
+      // Если для запроса есть перевод — используем его (например, "человек" → "person")
+      const translatedQuery = translationMap[query] || query;
+      
+      // Рисуем текущий кадр с камеры на canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      let foundAny = false;
+      predictions.forEach(pred => {
+        // Изменён порог уверенности на 0.3 для большей чувствительности:
+        if (pred.score < 0.3) return;
+        
+        const label = pred.class.toLowerCase();
+        // Отрисовка только тех объектов, чья метка точно совпадает с переведённым запросом
+        if (query !== "" && label === translatedQuery) {
+          foundAny = true;
+          const [x, y, width, height] = pred.bbox;
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = 'lime';
+          ctx.font = '18px Arial';
+          ctx.fillStyle = 'lime';
+          ctx.strokeRect(x, y, width, height);
+          ctx.fillText(`${pred.class} ${(pred.score * 100).toFixed(1)}%`, x, y > 20 ? y - 5 : y + 20);
+        }
+      });
+      
+      if (query === "") {
+        output.innerText = 'Введите название предмета для поиска.';
+      } else if (foundAny) {
+        output.innerText = `✅ Предмет "${searchInput.value.trim()}" найден!`;
+      } else {
+        output.innerText = `❌ Предмет "${searchInput.value.trim()}" не найден.`;
+      }
+      
+      requestAnimationFrame(detect);
+    }
+
+    // Обработчики кнопок запуска и остановки поиска
+    startSearchBtn.addEventListener('click', () => {
+      if (!searchInput.value.trim()) {
+        alert('Введите название предмета для поиска!');
+        return;
+      }
+      isSearching = true;
+      startSearchBtn.disabled = true;
+      stopSearchBtn.disabled = false;
+      detect();
+    });
+
+    stopSearchBtn.addEventListener('click', () => {
+      isSearching = false;
+      startSearchBtn.disabled = false;
+      stopSearchBtn.disabled = true;
+      output.innerText = 'Поиск остановлен.';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+
+    setupCamera().then(loadModel);
+  </script>
+</body>
+</html>

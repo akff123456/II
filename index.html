@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VisionAI Object Detection - Поиск предметов</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VisionAI Object Detection - Расширенное распознавание</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');
 
@@ -16,17 +16,14 @@
       --text-dark: #111111;
       --shadow-glow-soft: 0 0 20px var(--accent-color);
     }
-
     [data-theme="dark"] {
       background-color: var(--bg-dark);
       color: var(--text-light);
     }
-
     [data-theme="light"] {
       background-color: var(--bg-light);
       color: var(--text-dark);
     }
-
     body {
       margin: 0;
       font-family: 'Orbitron', sans-serif;
@@ -36,14 +33,12 @@
       padding: 1rem;
       min-height: 100vh;
     }
-
     h1 {
       color: var(--primary-color);
       text-shadow: var(--shadow-glow-soft);
       text-align: center;
       margin-bottom: 1rem;
     }
-
     .container {
       max-width: 700px;
       width: 100%;
@@ -52,11 +47,9 @@
       border-radius: 15px;
       box-shadow: var(--shadow-glow-soft);
     }
-
     [data-theme="light"] .container {
       background-color: var(--bg-light);
     }
-
     video, canvas {
       width: 100%;
       border-radius: 12px;
@@ -64,7 +57,6 @@
       display: block;
       margin-bottom: 1rem;
     }
-
     .controls {
       display: flex;
       flex-direction: column;
@@ -72,7 +64,6 @@
       gap: 0.5rem;
       margin-bottom: 1rem;
     }
-
     input, button {
       padding: 0.6rem 1rem;
       border-radius: 10px;
@@ -80,7 +71,6 @@
       border: 1px solid #ccc;
       margin: 5px;
     }
-
     button {
       background-color: var(--primary-color);
       color: white;
@@ -88,18 +78,15 @@
       cursor: pointer;
       transition: transform 0.2s, background-color 0.3s;
     }
-
     button:hover {
       background-color: var(--accent-color);
       transform: scale(1.05);
     }
-
     #output {
       text-align: center;
       font-size: 1.2rem;
       margin-bottom: 1rem;
     }
-
     footer {
       margin-top: auto;
       padding: 0.5rem;
@@ -109,7 +96,7 @@
   </style>
 </head>
 <body data-theme="dark">
-  <h1>VisionAI Object Detection - Поиск предметов</h1>
+  <h1>VisionAI Object Detection - Расширенное распознавание</h1>
   <div class="container">
     <!-- Видео с камеры -->
     <video id="webcam" autoplay muted playsinline></video>
@@ -117,7 +104,7 @@
     <canvas id="canvas"></canvas>
 
     <div class="controls">
-      <input id="searchInput" type="text" placeholder="Введите название предмета" />
+      <input id="searchInput" type="text" placeholder="Введите название предмета">
       <button id="startSearchBtn">🔎 Искать предмет</button>
       <button id="stopSearchBtn" disabled>⏹ Остановить поиск</button>
     </div>
@@ -127,30 +114,70 @@
 
   <footer>© 2025 VisionAI KNN</footer>
 
-  <!-- Загружаем TensorFlow.js и модель COCO-SSD -->
+  <!-- Подключаем TensorFlow.js и COCO-SSD из CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <!-- Если вторая модель в формате tfjs доступна, загрузите её через tf.loadGraphModel -->
 
   <script>
-    const video           = document.getElementById('webcam');
-    const canvas          = document.getElementById('canvas');
-    const ctx             = canvas.getContext('2d');
-    const output          = document.getElementById('output');
-    const searchInput     = document.getElementById('searchInput');
-    const startSearchBtn  = document.getElementById('startSearchBtn');
-    const stopSearchBtn   = document.getElementById('stopSearchBtn');
-
-    let cocoSsdModel;
-    let isSearching = false;
-
-    // Словарь для перевода русского запроса в английскую метку модели
+    // Глобальные переменные
+    let modelA, modelB;
+    let isDetecting = false;
+    
+    /* Расширённый словарь.
+       Ключ — запрос на русском, значение — массив возможных меток,
+       которые может возвращать модель (на английском). */
     const translationMap = {
-      "человек": "person",
-      "бутылка": "bottle"
-      // Добавьте другие пары по необходимости.
+      "человек": ["person", "man", "human"],
+      "бутылка": ["bottle"],
+      "собака": ["dog"],
+      "кошка": ["cat"],
+      // Добавьте другие пары по необходимости...
     };
 
-    // Инициализация камеры с использованием задней камеры (facingMode: "environment")
+    // Интерфейсные элементы
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const searchInput = document.getElementById('searchInput');
+    const startSearchBtn = document.getElementById('startSearchBtn');
+    const stopSearchBtn = document.getElementById('stopSearchBtn');
+    const output = document.getElementById('output');
+
+    // Функция для вычисления расстояния Левенштейна (упрощённая реализация)
+    function levenshtein(a, b) {
+      const matrix = [];
+      for (let i = 0; i <= b.length; i++) {
+        matrix[i] = [i];
+      }
+      for (let j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+      }
+      for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+          if (b.charAt(i - 1) === a.charAt(j - 1)) {
+            matrix[i][j] = matrix[i - 1][j - 1];
+          } else {
+            matrix[i][j] = Math.min(
+              matrix[i - 1][j - 1] + 1,
+              matrix[i][j - 1] + 1,
+              matrix[i - 1][j] + 1
+            );
+          }
+        }
+      }
+      return matrix[b.length][a.length];
+    }
+
+    // Функция нечеткого сравнения: возвращает true, если схожесть (1 - distance/maxLen) превышает threshold
+    function fuzzyMatch(str1, str2, threshold = 0.5) {
+      const distance = levenshtein(str1, str2);
+      const maxLen = Math.max(str1.length, str2.length);
+      const similarity = 1 - distance / maxLen;
+      return similarity >= threshold;
+    }
+
+    // Инициализация камеры (используем заднюю камеру)
     async function setupCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
@@ -164,77 +191,97 @@
       }
     }
 
-    // Загрузка модели COCO-SSD
-    async function loadModel() {
-      output.innerText = 'Загрузка модели...';
-      cocoSsdModel = await cocoSsd.load();
-      output.innerText = 'Модель загружена. Введите название предмета для поиска.';
+    // Загрузка моделей: сначала загрузка COCO-SSD (modelA), затем попытка загрузки второй модели (modelB).
+    async function loadModels() {
+      output.innerText = "Загрузка модели A (COCO-SSD)...";
+      modelA = await cocoSsd.load();
+      output.innerText = "Модель A загружена. Загрузка модели B...";
+      try {
+        // Замените 'path/to/your/model.json' на корректный URL второй модели, если она имеется.
+        modelB = await tf.loadGraphModel('path/to/your/model.json');
+        output.innerText = "Модель B загружена. Введите запрос и запустите поиск.";
+      } catch (err) {
+        console.warn("Не удалось загрузить модель B. Будет использоваться только модель A.", err);
+        modelB = null;
+        output.innerText = "Модель B не загружена. Используется только модель A. Введите запрос и запустите поиск.";
+      }
     }
 
-    // Функция детекции: отрисовываем только те объекты, метка которых совпадает с запросом
-    async function detect() {
-      if (!isSearching) return;
+    // Функция комбинированной детекции с расширенным словарём и нечетким сравнением
+    async function combinedDetect() {
+      if (!isDetecting) return;
       
-      // Получаем детекции объектов с видео
-      const predictions = await cocoSsdModel.detect(video);
+      // Запускаем детекции обеих моделей параллельно (если modelB отсутствует — пустой массив)
+      const [predictionsA, predictionsBArray] = await Promise.all([
+        modelA.detect(video),
+        modelB ? modelB.detect(video) : Promise.resolve([])
+      ]);
+      
+      // Объединяем результаты и фильтруем по порогу score >= 0.3
+      let allPredictions = predictionsA.concat(predictionsBArray).filter(pred => pred.score >= 0.3);
+      
+      // Получаем введённый запрос и приводим его к нижнему регистру
       const query = searchInput.value.trim().toLowerCase();
-      // Если для запроса есть перевод — используем его (например, "человек" → "person")
-      const translatedQuery = translationMap[query] || query;
       
-      // Рисуем текущий кадр с камеры на canvas
+      // Если запрос есть и он имеется в словаре, используем список синонимов
+      // Если нет — будем сравнивать напрямую с введённым
+      const synonyms = translationMap[query] || [query];
+      
+      // Фильтруем детекции: если хотя бы один из синонимов fuzzyMatch совпадает с меткой детекции (также приведенной к нижнему регистру)
+      const finalResults = query ?
+        allPredictions.filter(pred => 
+          synonyms.some(syn => fuzzyMatch(syn, pred.class.toLowerCase(), 0.5))
+        ) : allPredictions;
+      
+      // Отрисовываем текущий кадр с камеры на canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      let foundAny = false;
-      predictions.forEach(pred => {
-        // Изменён порог уверенности на 0.3 для большей чувствительности:
-        if (pred.score < 0.3) return;
-        
-        const label = pred.class.toLowerCase();
-        // Отрисовка только тех объектов, чья метка точно совпадает с переведённым запросом
-        if (query !== "" && label === translatedQuery) {
-          foundAny = true;
-          const [x, y, width, height] = pred.bbox;
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = 'lime';
-          ctx.font = '18px Arial';
-          ctx.fillStyle = 'lime';
-          ctx.strokeRect(x, y, width, height);
-          ctx.fillText(`${pred.class} ${(pred.score * 100).toFixed(1)}%`, x, y > 20 ? y - 5 : y + 20);
-        }
+      // Отрисовываем bounding boxes и подписи для найденных объектов
+      finalResults.forEach(pred => {
+        const [x, y, width, height] = pred.bbox;
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'lime';
+        ctx.font = '18px Arial';
+        ctx.fillStyle = 'lime';
+        ctx.strokeRect(x, y, width, height);
+        ctx.fillText(`${pred.class} ${(pred.score * 100).toFixed(1)}%`, x, y > 20 ? y - 5 : y + 20);
       });
       
+      // Обновляем сообщение в блоке вывода
       if (query === "") {
-        output.innerText = 'Введите название предмета для поиска.';
-      } else if (foundAny) {
+        output.innerText = "Введите название предмета для поиска.";
+      } else if (finalResults.length > 0) {
         output.innerText = `✅ Предмет "${searchInput.value.trim()}" найден!`;
       } else {
         output.innerText = `❌ Предмет "${searchInput.value.trim()}" не найден.`;
       }
       
-      requestAnimationFrame(detect);
+      // Продолжаем детекцию в реальном времени
+      requestAnimationFrame(combinedDetect);
     }
 
-    // Обработчики кнопок запуска и остановки поиска
+    // Обработчики для кнопок старта/стопа поиска
     startSearchBtn.addEventListener('click', () => {
       if (!searchInput.value.trim()) {
-        alert('Введите название предмета для поиска!');
+        alert("Введите название предмета для поиска!");
         return;
       }
-      isSearching = true;
+      isDetecting = true;
       startSearchBtn.disabled = true;
       stopSearchBtn.disabled = false;
-      detect();
+      combinedDetect();
     });
 
     stopSearchBtn.addEventListener('click', () => {
-      isSearching = false;
+      isDetecting = false;
       startSearchBtn.disabled = false;
       stopSearchBtn.disabled = true;
-      output.innerText = 'Поиск остановлен.';
+      output.innerText = "Поиск остановлен.";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
 
-    setupCamera().then(loadModel);
+    // Инициализация: сначала запускаем камеру, затем загружаем модели
+    setupCamera().then(loadModels);
   </script>
 </body>
 </html>
